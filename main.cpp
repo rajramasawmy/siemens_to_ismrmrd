@@ -1,25 +1,24 @@
-//#ifndef WIN32
-#include <libxml/parser.h>
-#include <libxml/xmlschemas.h>
-#include <libxml/xmlmemory.h>
-#include <libxml/debugXML.h>
-#include <libxml/HTMLtree.h>
-#include <libxml/xmlIO.h>
-#include <libxml/xinclude.h>
-#include <libxml/catalog.h>
-#include <libxslt/xslt.h>
-#include <libxslt/xsltInternals.h>
-#include <libxslt/transform.h>
-#include <libxslt/xsltutils.h>
-//#endif //WIN32
+#ifndef WIN32
+    #include <libxml/parser.h>
+    #include <libxml/xmlschemas.h>
+    #include <libxml/xmlmemory.h>
+    #include <libxml/debugXML.h>
+    #include <libxml/HTMLtree.h>
+    #include <libxml/xmlIO.h>
+    #include <libxml/xinclude.h>
+    #include <libxml/catalog.h>
+    #include <libxslt/xslt.h>
+    #include <libxslt/xsltInternals.h>
+    #include <libxslt/transform.h>
+    #include <libxslt/xsltutils.h>
+#endif //WIN32
 
-/*
 #ifdef WIN32
     #include <windows.h>
     #include <Shlwapi.h>
     #pragma comment(lib, "shlwapi.lib")
 #endif // WIN32
-*/
+
 #include "siemensraw.h"
 #include "base64.h"
 #include "XNode.h"
@@ -102,6 +101,8 @@ void get_trajectory(const std::vector<std::string> &wip_double, const Trajectory
                     long radial_views, ISMRMRD::NDArray<float> &traj, std::vector<size_t> &traj_dim);
 
 
+#ifndef WIN32
+
 int xml_file_is_valid(std::string& xml, std::string& schema_file)
 {
     xmlDocPtr doc;
@@ -155,6 +156,7 @@ int xml_file_is_valid(std::string& xml, std::string& schema_file)
     return is_valid ? 1 : 0;
 }
 
+#endif // WIN32
 
 
 std::string get_date_time_string()
@@ -1049,9 +1051,6 @@ int main(int argc, char *argv[] )
                 additional_bytes << " additional bytes at the end of file." << std::endl;
     }
 
-
-
-
     //Write header
     std::stringstream ss;
     ISMRMRD::serialize(header,ss);
@@ -1528,7 +1527,8 @@ void create_xml_parameters(bool debug_xml, bool append_buffers, const std::strin
         }
     }
 
-    // whether this scan is a adjustment scanif ( protocol_name == "AdjCoilSens" )
+    // whether this scan is a adjustment scan
+    if ( protocol_name == "AdjCoilSens" )
     {
         isAdjustCoilSens = true;
     }
@@ -1554,7 +1554,7 @@ void create_xml_parameters(bool debug_xml, bool append_buffers, const std::strin
         o.write(xml_config.c_str(), xml_config.size());
     }
 
-
+#ifndef WIN32
     xsltStylesheetPtr cur = NULL;
 
     xmlDocPtr doc, res, xml_doc;
@@ -1613,6 +1613,70 @@ void create_xml_parameters(bool debug_xml, bool append_buffers, const std::strin
     xsltCleanupGlobals();
     xmlCleanupParser();
 
+#else // WIN32
+
+    std::string syscmd;
+    int xsltproc_res(0);
+
+    std::string xml_post("xml_post.xml"), xml_pre("xml_pre.xml");
+
+    // Full path to the executable (including the executable file)
+    char fullPath[MAX_PATH];
+
+    // Full path to the executable (without executable file)
+    char *rightPath;
+
+    // Will contain exe path
+    HMODULE hModule = GetModuleHandle(NULL);
+    if (hModule != NULL)
+    {
+        // When passing NULL to GetModuleHandle, it returns handle of exe itself
+        GetModuleFileName(hModule, fullPath, (sizeof(fullPath)));
+
+        rightPath = fullPath;
+
+        PathRemoveFileSpec(rightPath);
+    }
+    else
+    {
+        std::cout << "The path to the executable is NULL" << std::endl;
+    }
+
+    std::ofstream xslf("xsl_file");
+    xslf.write(parammap_xsl_content.c_str(), parammap_xsl_content.size());
+    xslf.close();
+
+    syscmd = std::string(rightPath) + std::string("\\") + std::string("xsltproc --output xml_post.xml \"") + std::string("xsl_file") + std::string("\" xml_pre.xml");
+
+    std::ofstream o(xml_pre.c_str());
+    o.write(xml_config.c_str(), xml_config.size());
+    o.close();
+
+    xsltproc_res = system(syscmd.c_str());
+
+    std::ifstream t(xml_post.c_str());
+    xml_config = std::string((std::istreambuf_iterator<char>(t)), std::istreambuf_iterator<char>());
+
+    if (xsltproc_res != 0)
+    {
+        std::cerr << "Failed to call up xsltproc : \t" << syscmd << std::endl;
+
+        std::ofstream o(xml_pre.c_str());
+        o.write(xml_config.c_str(), xml_config.size());
+        o.close();
+
+        xsltproc_res = system(syscmd.c_str());
+
+        if (xsltproc_res != 0)
+        {
+            throw std::runtime_error("Failed to generate XML header");
+        }
+
+        std::ifstream t(xml_post.c_str());
+        xml_config = std::string((std::istreambuf_iterator<char>(t)),
+            std::istreambuf_iterator<char>());
+    }
+#endif //WIN32
 
     //Append buffers to xml_config if requested
     if (append_buffers) {
